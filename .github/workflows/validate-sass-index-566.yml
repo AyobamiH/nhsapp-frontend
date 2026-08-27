@@ -148,9 +148,18 @@ jobs:
           npm run release
           archive="dist/nhsapp-frontend-$(node -p "require('./package.json').version").zip"
           test -f "$archive"
-          unzip -l "$archive" > "$RUNNER_TEMP/release-contents"
-          grep -q '_nhsapp.scss' "$RUNNER_TEMP/release-contents"
-          grep -q 'nhsapp/index.scss' "$RUNNER_TEMP/release-contents"
+
+          release_dir="$RUNNER_TEMP/release-archive"
+          mkdir -p "$release_dir"
+          unzip -q "$archive" -d "$release_dir"
+          find "$release_dir" -type f -print | sort
+
+          shim=$(find "$release_dir" -type f -name '_nhsapp.scss' -print -quit)
+          index=$(find "$release_dir" -type f -name 'index.scss' -print -quit)
+          test -n "$shim"
+          test -n "$index"
+          cmp src/_nhsapp.scss "$shim"
+          cmp src/index.scss "$index"
 
       - name: Confirm clean contribution
         run: |
