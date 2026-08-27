@@ -30,7 +30,6 @@ jobs:
         run: |
           npm ci
           npm run lint
-          npm run docs:build
           npm run prepack
 
           mkdir -p "$RUNNER_TEMP/pack"
@@ -38,7 +37,7 @@ jobs:
           package_archive=$(find "$RUNNER_TEMP/pack" -maxdepth 1 -name '*.tgz' -print -quit)
           printf '%s\n' "$package_archive" > "$RUNNER_TEMP/package-archive-path"
 
-      - name: Diagnose Sass resolver precedence
+      - name: Test root Sass shim precedence
         run: |
           package_archive=$(cat "$RUNNER_TEMP/package-archive-path")
           consumer="$RUNNER_TEMP/consumer"
@@ -51,67 +50,53 @@ jobs:
           cat > "$consumer/all.scss" <<'SCSS'
           @import "node_modules/nhsapp-frontend/dist/nhsapp/all";
           SCSS
-
-          cat > "$consumer/directory.scss" <<'SCSS'
+          cat > "$consumer/short.scss" <<'SCSS'
           @import "node_modules/nhsapp-frontend/dist/nhsapp";
           SCSS
 
-          cat > "$consumer/directory-slash.scss" <<'SCSS'
-          @import "node_modules/nhsapp-frontend/dist/nhsapp/";
-          SCSS
-
-          cat > "$consumer/explicit-index.scss" <<'SCSS'
-          @import "node_modules/nhsapp-frontend/dist/nhsapp/index";
-          SCSS
-
           sass_bin="$GITHUB_WORKSPACE/node_modules/.bin/sass"
-          for name in all directory directory-slash explicit-index; do
-            set +e
-            "$sass_bin" --style=compressed --no-source-map \
-              --load-path="$consumer/node_modules" \
-              "$consumer/$name.scss" "$consumer/$name.css" \
-              >"$consumer/$name.stdout" 2>"$consumer/$name.stderr"
-            status=$?
-            set -e
-            printf '%s=%s\n' "$name" "$status"
-            cat "$consumer/$name.stderr"
-          done
+          "$sass_bin" --style=compressed --no-source-map \
+            --load-path="$consumer/node_modules" \
+            "$consumer/all.scss" "$consumer/all.css"
 
-          CONSUMER="$consumer" PACKAGE="$package" python <<'PY'
+          "$sass_bin" --style=compressed --no-source-map \
+            --load-path="$consumer/node_modules" \
+            "$consumer/short.scss" "$consumer/no-shim.css"
+
+          cat > "$package/dist/_nhsapp.scss" <<'SCSS'
+          @import "nhsapp/index";
+          SCSS
+          "$sass_bin" --style=compressed --no-source-map \
+            --load-path="$consumer/node_modules" \
+            "$consumer/short.scss" "$consumer/partial-shim.css"
+          rm "$package/dist/_nhsapp.scss"
+
+          cat > "$package/dist/nhsapp.scss" <<'SCSS'
+          @import "nhsapp/index";
+          SCSS
+          "$sass_bin" --style=compressed --no-source-map \
+            --load-path="$consumer/node_modules" \
+            "$consumer/short.scss" "$consumer/regular-shim.css"
+          rm "$package/dist/nhsapp.scss"
+
+          CONSUMER="$consumer" python <<'PY'
           import hashlib
           import os
           from pathlib import Path
 
-          consumer = Path(os.environ["CONSUMER"])
-          package = Path(os.environ["PACKAGE"])
-          files = {
-              "all": consumer / "all.css",
-              "directory": consumer / "directory.css",
-              "directory-slash": consumer / "directory-slash.css",
-              "explicit-index": consumer / "explicit-index.css",
-              "precompiled": package / "dist/nhsapp.css",
-          }
-
-          contents = {}
-          for name, path in files.items():
-              if not path.exists():
-                  print(f"{name}: missing")
-                  continue
-              content = path.read_text()
-              contents[name] = content
+          root = Path(os.environ["CONSUMER"])
+          baseline = (root / "all.css").read_text()
+          for name in ("no-shim", "partial-shim", "regular-shim"):
+              content = (root / f"{name}.css").read_text()
               print(
-                  f"{name}: len={len(content)} "
-                  f"sha={hashlib.sha256(content.encode()).hexdigest()} "
-                  f"has_import={'@import' in content} "
-                  f"has_card={'.nhsapp-card' in content} "
-                  f"prefix={content[:120]!r}"
+                  f"{name}: equal={content == baseline} len={len(content)} "
+                  f"sha={hashlib.sha256(content.encode()).hexdigest()}"
               )
-
-          for left in contents:
-              for right in contents:
-                  if left < right:
-                      print(f"equal[{left},{right}]={contents[left] == contents[right]}")
           PY
+
+          ! cmp -s "$consumer/all.css" "$consumer/no-shim.css"
+          cmp "$consumer/all.css" "$consumer/partial-shim.css"
+          cmp "$consumer/all.css" "$consumer/regular-shim.css"
 
       - name: Confirm clean contribution
         run: |
