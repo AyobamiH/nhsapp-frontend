@@ -1,0 +1,135 @@
+name: Validate card title guard
+
+on:
+  push:
+    branches:
+      - validation/card-footer-empty-title-574
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Verify card rendering and regression
+        run: |
+          cat > /tmp/validate-card.mjs <<'EOF'
+          import assert from "node:assert/strict"
+          import path from "node:path"
+          import nunjucks from "nunjucks"
+
+          const sourceRoot = process.argv[2]
+          const expectation = process.argv[3]
+          const workspace = process.cwd()
+
+          const env = nunjucks.configure(
+            [
+              path.join(sourceRoot, "src"),
+              path.join(sourceRoot, "src/styles"),
+              path.join(sourceRoot, "src/assets"),
+              path.join(workspace, "node_modules/nhsuk-frontend/dist"),
+              path.join(workspace, "node_modules/nhsuk-frontend/dist/nhsuk"),
+              path.join(
+                workspace,
+                "node_modules/nhsuk-frontend/dist/nhsuk/components"
+              ),
+              path.join(
+                workspace,
+                "node_modules/nhsuk-frontend/dist/nhsuk/macros"
+              )
+            ],
+            {
+              lstripBlocks: true,
+              trimBlocks: true
+            }
+          )
+
+          const render = (params) =>
+            env.render("components/card/card.njk", { params })
+
+          const descriptionOnly = render({
+            classes: "nhsapp-card--pale-blue",
+            descriptionHtml: "<p>Long stay</p>"
+          })
+          const footerOnly = render({
+            footer: { html: "<p>Long stay</p>" }
+          })
+
+          if (expectation === "fixed") {
+            assert.doesNotMatch(descriptionOnly, /nhsapp-card__title/)
+            assert.doesNotMatch(footerOnly, /nhsapp-card__title/)
+          } else if (expectation === "regression") {
+            assert.match(descriptionOnly, /nhsapp-card__title/)
+            assert.match(footerOnly, /nhsapp-card__title/)
+          } else {
+            throw new Error(`Unknown expectation: ${expectation}`)
+          }
+
+          assert.match(descriptionOnly, /Long stay/)
+          assert.match(footerOnly, /nhsapp-card__footer/)
+
+          const paragraphTitle = render({ title: "Appointment" })
+          assert.match(
+            paragraphTitle,
+            /<p class="nhsapp-card__title[^"]*">Appointment<\/p>/
+          )
+
+          const headingTitle = render({
+            titleHtml: "<strong>Appointment</strong>",
+            headingLevel: 2
+          })
+          assert.match(headingTitle, /<h2 class="nhsapp-card__title/)
+          assert.match(headingTitle, /<strong>Appointment<\/strong>/)
+
+          const linkedTitle = render({
+            title: "Appointment",
+            href: "#appointment"
+          })
+          assert.match(linkedTitle, /class="nhsapp-card__link/)
+          assert.match(linkedTitle, /Appointment/)
+
+          console.log(`Card render assertions passed: ${expectation}`)
+          EOF
+
+          node /tmp/validate-card.mjs "$GITHUB_WORKSPACE" fixed
+
+          mkdir -p /tmp/upstream-base
+          git archive 775518abf9f7a88e2fdd4a4c28048ca8c3f0b639 src | \
+            tar -x -C /tmp/upstream-base
+
+          set +e
+          node /tmp/validate-card.mjs /tmp/upstream-base fixed
+          baseline_status=$?
+          set -e
+          test "$baseline_status" -ne 0
+
+          node /tmp/validate-card.mjs /tmp/upstream-base regression
+
+      - name: Build documentation
+        run: npm run docs:build
+
+      - name: Build package bundle
+        run: npm run prepack
+
+      - name: Verify bundled template
+        run: cmp src/components/card/card.njk dist/nhsapp/components/card/card.njk
+
+      - name: Verify no tracked build output changed
+        run: git diff --exit-code
