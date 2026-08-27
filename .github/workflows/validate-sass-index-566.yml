@@ -76,13 +76,13 @@ jobs:
           SCSS
 
           sass_bin="$GITHUB_WORKSPACE/node_modules/.bin/sass"
-          "$sass_bin" --no-source-map \
+          "$sass_bin" --style=compressed --no-source-map \
             --load-path="$consumer/node_modules" \
             "$consumer/all-existing.scss" "$consumer/all-existing.css"
-          "$sass_bin" --no-source-map \
+          "$sass_bin" --style=compressed --no-source-map \
             --load-path="$consumer/node_modules" \
             "$consumer/all-index.scss" "$consumer/all-index.css"
-          "$sass_bin" --no-source-map \
+          "$sass_bin" --style=compressed --no-source-map \
             --load-path="$consumer/node_modules" \
             "$consumer/button-index.scss" "$consumer/button-index.css"
 
@@ -113,7 +113,7 @@ jobs:
 
           set +e
           output=$(
-            "$GITHUB_WORKSPACE/node_modules/.bin/sass" --no-source-map \
+            "$GITHUB_WORKSPACE/node_modules/.bin/sass" --style=compressed --no-source-map \
               --load-path="$base_consumer/node_modules" \
               "$base_consumer/all-index.scss" \
               "$base_consumer/all-index.css" 2>&1
