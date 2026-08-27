@@ -1,0 +1,133 @@
+name: Validate Sass index entrypoints
+
+on:
+  push:
+    branches:
+      - automation/validate-sass-index-566
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check out clean contribution
+        run: git checkout feat/sass-index-entrypoints-566
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build documentation
+        run: |
+          npm run docs:build
+          grep -R -q 'node_modules/nhsapp-frontend/dist/nhsapp' _site
+          grep -R -q 'node_modules/nhsapp-frontend/dist/nhsapp/components/button' _site
+
+      - name: Build and inspect package
+        run: |
+          npm run prepack
+          test -f dist/nhsapp/_index.scss
+          cmp src/_index.scss dist/nhsapp/_index.scss
+
+          mkdir -p "$RUNNER_TEMP/pack"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/pack" >/dev/null
+          package_archive=$(find "$RUNNER_TEMP/pack" -maxdepth 1 -name '*.tgz' -print -quit)
+          test -n "$package_archive"
+          tar -tzf "$package_archive" | grep -qx 'package/dist/nhsapp/_index.scss'
+          printf '%s\n' "$package_archive" > "$RUNNER_TEMP/package-archive-path"
+
+      - name: Compile documented Sass imports from packed package
+        run: |
+          package_archive=$(cat "$RUNNER_TEMP/package-archive-path")
+          consumer="$RUNNER_TEMP/consumer"
+          mkdir -p "$consumer/node_modules/nhsapp-frontend"
+          tar -xzf "$package_archive" \
+            -C "$consumer/node_modules/nhsapp-frontend" \
+            --strip-components=1
+          ln -s "$GITHUB_WORKSPACE/node_modules/nhsuk-frontend" \
+            "$consumer/node_modules/nhsuk-frontend"
+
+          cat > "$consumer/all-existing.scss" <<'SCSS'
+          @import "node_modules/nhsapp-frontend/dist/nhsapp/all";
+          SCSS
+
+          cat > "$consumer/all-index.scss" <<'SCSS'
+          @import "node_modules/nhsapp-frontend/dist/nhsapp";
+          SCSS
+
+          cat > "$consumer/button-index.scss" <<'SCSS'
+          @import "node_modules/nhsapp-frontend/dist/nhsapp/components/button";
+          SCSS
+
+          sass_bin="$GITHUB_WORKSPACE/node_modules/.bin/sass"
+          "$sass_bin" --no-source-map \
+            --load-path="$consumer/node_modules" \
+            "$consumer/all-existing.scss" "$consumer/all-existing.css"
+          "$sass_bin" --no-source-map \
+            --load-path="$consumer/node_modules" \
+            "$consumer/all-index.scss" "$consumer/all-index.css"
+          "$sass_bin" --no-source-map \
+            --load-path="$consumer/node_modules" \
+            "$consumer/button-index.scss" "$consumer/button-index.css"
+
+          cmp "$consumer/all-existing.css" "$consumer/all-index.css"
+          grep -q '.nhsapp-button' "$consumer/button-index.css"
+
+      - name: Prove package-level shortcut fails on current upstream
+        run: |
+          base="$RUNNER_TEMP/nhsapp-frontend-566-base"
+          git worktree add --detach "$base" \
+            775518abf9f7a88e2fdd4a4c28048ca8c3f0b639
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$base/node_modules"
+
+          (
+            cd "$base"
+            "$GITHUB_WORKSPACE/node_modules/.bin/gulp" bundle
+          )
+
+          base_consumer="$RUNNER_TEMP/base-consumer"
+          mkdir -p "$base_consumer/node_modules"
+          ln -s "$base" "$base_consumer/node_modules/nhsapp-frontend"
+          ln -s "$GITHUB_WORKSPACE/node_modules/nhsuk-frontend" \
+            "$base_consumer/node_modules/nhsuk-frontend"
+
+          cat > "$base_consumer/all-index.scss" <<'SCSS'
+          @import "node_modules/nhsapp-frontend/dist/nhsapp";
+          SCSS
+
+          set +e
+          output=$(
+            "$GITHUB_WORKSPACE/node_modules/.bin/sass" --no-source-map \
+              --load-path="$base_consumer/node_modules" \
+              "$base_consumer/all-index.scss" \
+              "$base_consumer/all-index.css" 2>&1
+          )
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+
+          test "$status" -ne 0
+          grep -q "Can't find stylesheet to import" <<< "$output"
+
+          rm "$base/node_modules"
+          git worktree remove --force "$base"
+
+      - name: Confirm clean contribution
+        run: |
+          git diff --exit-code
+          test -z "$(git status --porcelain --untracked-files=no)"
