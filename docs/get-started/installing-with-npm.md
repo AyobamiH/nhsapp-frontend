@@ -34,13 +34,13 @@ You need to import the NHS App frontend styles into the main Sass file in your p
 1. To import all components, add the below to your Sass file:
 
 ```CSS
-@import "node_modules/nhsapp-frontend/dist/nhsapp/all";
+@import "node_modules/nhsapp-frontend/dist/nhsapp";
 ```
 
 2. To import an individual component (for example a button), add the below to your Sass file:
 
 ```CSS
-@import "node_modules/nhsapp-frontend/dist/nhsapp/components/button/button";
+@import "node_modules/nhsapp-frontend/dist/nhsapp/components/button";
 ```
 
 ## Importing assets
