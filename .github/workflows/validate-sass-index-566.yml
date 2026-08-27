@@ -52,7 +52,7 @@ jobs:
           grep -qx 'package/dist/nhsapp/index.scss' "$RUNNER_TEMP/package-contents"
           printf '%s\n' "$package_archive" > "$RUNNER_TEMP/package-archive-path"
 
-      - name: Compile and diagnose documented Sass imports
+      - name: Compile documented Sass imports from packed package
         run: |
           package_archive=$(cat "$RUNNER_TEMP/package-archive-path")
           consumer="$RUNNER_TEMP/consumer"
@@ -63,10 +63,6 @@ jobs:
           ln -s "$GITHUB_WORKSPACE/node_modules/nhsuk-frontend" \
             "$consumer/node_modules/nhsuk-frontend"
 
-          cat > "$consumer/node_modules/nhsapp-frontend/dist/nhsapp/import-wrapper.scss" <<'SCSS'
-          @import "all";
-          SCSS
-
           cat > "$consumer/all-existing.scss" <<'SCSS'
           @import "node_modules/nhsapp-frontend/dist/nhsapp/all";
           SCSS
@@ -75,61 +71,25 @@ jobs:
           @import "node_modules/nhsapp-frontend/dist/nhsapp";
           SCSS
 
-          cat > "$consumer/all-import-wrapper.scss" <<'SCSS'
-          @import "node_modules/nhsapp-frontend/dist/nhsapp/import-wrapper";
-          SCSS
-
           cat > "$consumer/button-index.scss" <<'SCSS'
           @import "node_modules/nhsapp-frontend/dist/nhsapp/components/button";
           SCSS
 
           sass_bin="$GITHUB_WORKSPACE/node_modules/.bin/sass"
-          for name in all-existing all-index all-import-wrapper button-index; do
+          for name in all-existing all-index button-index; do
             "$sass_bin" --style=compressed --no-source-map \
               --load-path="$consumer/node_modules" \
               "$consumer/$name.scss" "$consumer/$name.css"
           done
 
+          cmp "$consumer/all-existing.css" "$consumer/all-index.css"
+
           for selector in '.nhsapp-badge' '.nhsapp-button' '.nhsapp-card' '.nhsapp-timeline'; do
-            grep -q "$selector" "$consumer/all-existing.css"
             grep -q "$selector" "$consumer/all-index.css"
-            grep -q "$selector" "$consumer/all-import-wrapper.css"
           done
           grep -q '.nhsapp-button' "$consumer/button-index.css"
 
-          CONSUMER="$consumer" python <<'PY'
-          import hashlib
-          import os
-          from pathlib import Path
-
-          root = Path(os.environ["CONSUMER"])
-          baseline = (root / "all-existing.css").read_text()
-
-          for name in ("all-index", "all-import-wrapper"):
-              candidate = (root / f"{name}.css").read_text()
-              print(
-                  f"{name}: baseline_len={len(baseline)} candidate_len={len(candidate)} "
-                  f"baseline_sha={hashlib.sha256(baseline.encode()).hexdigest()} "
-                  f"candidate_sha={hashlib.sha256(candidate.encode()).hexdigest()}"
-              )
-              limit = min(len(baseline), len(candidate))
-              mismatch = next(
-                  (index for index in range(limit) if baseline[index] != candidate[index]),
-                  None,
-              )
-              if mismatch is None and len(baseline) == len(candidate):
-                  print(f"{name}: byte-identical")
-                  continue
-              if mismatch is None:
-                  mismatch = limit
-              start = max(0, mismatch - 240)
-              end = mismatch + 480
-              print(f"{name}: first_difference={mismatch}")
-              print("BASELINE_CONTEXT", repr(baseline[start:end]))
-              print("CANDIDATE_CONTEXT", repr(candidate[start:end]))
-          PY
-
-      - name: Prove package-level shortcut fails on current upstream
+      - name: Prove package-level shortcut is unresolved on current upstream
         run: |
           base="$RUNNER_TEMP/nhsapp-frontend-566-base"
           git worktree add --detach "$base" \
@@ -151,19 +111,13 @@ jobs:
           @import "node_modules/nhsapp-frontend/dist/nhsapp";
           SCSS
 
-          set +e
-          output=$(
-            "$GITHUB_WORKSPACE/node_modules/.bin/sass" --style=compressed --no-source-map \
-              --load-path="$base_consumer/node_modules" \
-              "$base_consumer/all-index.scss" \
-              "$base_consumer/all-index.css" 2>&1
-          )
-          status=$?
-          set -e
-          printf '%s\n' "$output"
+          "$GITHUB_WORKSPACE/node_modules/.bin/sass" --style=compressed --no-source-map \
+            --load-path="$base_consumer/node_modules" \
+            "$base_consumer/all-index.scss" \
+            "$base_consumer/all-index.css"
 
-          test "$status" -ne 0
-          grep -q "Can't find stylesheet to import" <<< "$output"
+          grep -q '@import' "$base_consumer/all-index.css"
+          ! grep -q '.nhsapp-card' "$base_consumer/all-index.css"
 
           rm "$base/node_modules"
           git worktree remove --force "$base"
