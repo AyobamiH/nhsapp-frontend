@@ -35,8 +35,8 @@ jobs:
       - name: Build documentation
         run: |
           npm run docs:build
-          grep -R -q 'node_modules/nhsapp-frontend/dist/nhsapp' _site
-          grep -R -q 'node_modules/nhsapp-frontend/dist/nhsapp/components/button' _site
+          grep -R -q 'node_modules/nhsapp-frontend/dist/nhsapp' dist/docs
+          grep -R -q 'node_modules/nhsapp-frontend/dist/nhsapp/components/button' dist/docs
 
       - name: Build and inspect package
         run: |
