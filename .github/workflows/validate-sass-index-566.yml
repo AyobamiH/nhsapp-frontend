@@ -41,14 +41,15 @@ jobs:
       - name: Build and inspect package
         run: |
           npm run prepack
-          test -f dist/nhsapp/_index.scss
-          cmp src/_index.scss dist/nhsapp/_index.scss
+          test -f dist/nhsapp/index.scss
+          cmp src/index.scss dist/nhsapp/index.scss
 
           mkdir -p "$RUNNER_TEMP/pack"
           npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/pack" >/dev/null
           package_archive=$(find "$RUNNER_TEMP/pack" -maxdepth 1 -name '*.tgz' -print -quit)
           test -n "$package_archive"
-          tar -tzf "$package_archive" | grep -qx 'package/dist/nhsapp/_index.scss'
+          tar -tzf "$package_archive" > "$RUNNER_TEMP/package-contents"
+          grep -qx 'package/dist/nhsapp/index.scss' "$RUNNER_TEMP/package-contents"
           printf '%s\n' "$package_archive" > "$RUNNER_TEMP/package-archive-path"
 
       - name: Compile documented Sass imports from packed package
