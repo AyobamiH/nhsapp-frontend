@@ -33,13 +33,17 @@ jobs:
           set -euo pipefail
           npm run prepack
           package_file=$(npm pack --ignore-scripts --silent)
+          package_path="$GITHUB_WORKSPACE/$package_file"
           consumer="$RUNNER_TEMP/consumer"
-          mkdir -p "$consumer/node_modules/nhsapp-frontend"
-          tar -xzf "$package_file" --strip-components=1 \
-            -C "$consumer/node_modules/nhsapp-frontend"
+          mkdir -p "$consumer"
+          cd "$consumer"
+          npm init -y >/dev/null
+          npm install "$package_path"
+          cd "$GITHUB_WORKSPACE"
 
           test -f "$consumer/node_modules/nhsapp-frontend/dist/_nhsapp.scss"
           test -f "$consumer/node_modules/nhsapp-frontend/dist/nhsapp/index.scss"
+          test -d "$consumer/node_modules/nhsuk-frontend"
 
           printf '@import "nhsapp-frontend/dist/nhsapp";\n' > "$consumer/all.scss"
           printf '@import "nhsapp-frontend/dist/nhsapp/components/button";\n' > "$consumer/button.scss"
