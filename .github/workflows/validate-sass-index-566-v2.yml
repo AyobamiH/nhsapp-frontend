@@ -49,11 +49,11 @@ jobs:
           printf '@import "nhsapp-frontend/dist/nhsapp/components/button";\n' > "$consumer/button.scss"
           printf '@import "nhsapp-frontend/dist/nhsapp/all";\n' > "$consumer/legacy.scss"
 
-          npx sass --load-path="$consumer/node_modules" --style=compressed \
+          npx sass --no-source-map --load-path="$consumer/node_modules" --style=compressed \
             "$consumer/all.scss" "$consumer/all.css"
-          npx sass --load-path="$consumer/node_modules" --style=compressed \
+          npx sass --no-source-map --load-path="$consumer/node_modules" --style=compressed \
             "$consumer/button.scss" "$consumer/button.css"
-          npx sass --load-path="$consumer/node_modules" --style=compressed \
+          npx sass --no-source-map --load-path="$consumer/node_modules" --style=compressed \
             "$consumer/legacy.scss" "$consumer/legacy.css"
 
           cmp "$consumer/all.css" "$consumer/legacy.css"
