@@ -62,18 +62,29 @@ jobs:
       - name: Validate documentation and release archive
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           ! grep -Fq '@import "node_modules/nhsapp-frontend/' docs/get-started/installing-with-npm.md
           grep -Fq '@import "nhsapp-frontend/dist/nhsapp";' docs/get-started/installing-with-npm.md
           grep -Fq '@import "nhsapp-frontend/dist/nhsapp/components/button";' docs/get-started/installing-with-npm.md
           grep -Fq -- '--load-path=node_modules' docs/get-started/installing-with-npm.md
+
           npm run release
           release_zip=$(find dist -maxdepth 1 -name 'nhsapp-frontend-*.zip' -print -quit)
           test -n "$release_zip"
           unzip -Z1 "$release_zip" > "$RUNNER_TEMP/release-contents.txt"
-          cat "$RUNNER_TEMP/release-contents.txt"
-          grep -Fq '_nhsapp.scss' "$RUNNER_TEMP/release-contents.txt"
-          grep -Fq 'nhsapp/index.scss' "$RUNNER_TEMP/release-contents.txt"
+          grep -Fxq 'index.scss' "$RUNNER_TEMP/release-contents.txt"
+          ! grep -Fxq '_nhsapp.scss' "$RUNNER_TEMP/release-contents.txt"
+
+          release_dir="$RUNNER_TEMP/release"
+          mkdir -p "$release_dir"
+          unzip -q "$release_zip" -d "$release_dir"
+          printf '@import "index";\n' > "$release_dir/consumer.scss"
+          npx sass --no-source-map \
+            --load-path="$release_dir" \
+            --load-path="$RUNNER_TEMP/consumer/node_modules" \
+            --style=compressed \
+            "$release_dir/consumer.scss" "$release_dir/consumer.css"
+          grep -Fq '.nhsapp-button' "$release_dir/consumer.css"
+
           git diff --check origin/main...HEAD
-          git status --porcelain --untracked-files=no
           test -z "$(git status --porcelain --untracked-files=no)"
