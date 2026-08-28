@@ -1,0 +1,155 @@
+name: Senior audit Sass entrypoint for issue 566
+
+on:
+  push:
+    branches:
+      - automation/senior-audit-sass-entrypoint-566
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-contract:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: feat/sass-index-entrypoints-566
+          fetch-depth: 0
+
+      - name: Verify exact candidate
+        run: |
+          test "$(git rev-parse HEAD)" = "35bef5b42b3e86a49daa43c956f75a38e5fc568a"
+          test -z "$(git status --porcelain)"
+
+      - name: Setup Node
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint and build package
+        run: |
+          npm run lint
+          npm run prepack
+
+      - name: Inspect built distribution
+        run: |
+          test -f dist/_nhsapp.scss
+          test -f dist/nhsapp/index.scss
+          test ! -e dist/nhsapp/_nhsapp.scss
+          cmp src/_nhsapp.scss dist/_nhsapp.scss
+          cmp src/index.scss dist/nhsapp/index.scss
+          test "$(cat dist/_nhsapp.scss)" = '@import "nhsapp/index";'
+          test "$(cat dist/nhsapp/index.scss)" = '@import "all";'
+
+      - name: Pack candidate and create clean consumer
+        run: |
+          mkdir -p .tmp/package .tmp/consumer/node_modules/nhsapp-frontend
+          npm pack --ignore-scripts --pack-destination .tmp/package
+          tarball=$(find .tmp/package -maxdepth 1 -name '*.tgz' -print -quit)
+          test -n "$tarball"
+          tar -xzf "$tarball" -C .tmp/consumer/node_modules/nhsapp-frontend --strip-components=1
+          test -f .tmp/consumer/node_modules/nhsapp-frontend/dist/_nhsapp.scss
+          test -f .tmp/consumer/node_modules/nhsapp-frontend/dist/nhsapp/index.scss
+          test ! -e .tmp/consumer/node_modules/nhsapp-frontend/dist/nhsapp/_nhsapp.scss
+
+      - name: Create consumer Sass fixtures
+        run: |
+          cat > .tmp/consumer/all-import.scss <<'SCSS'
+          @import "node_modules/nhsapp-frontend/dist/nhsapp/all";
+          SCSS
+          cat > .tmp/consumer/root-import.scss <<'SCSS'
+          @import "node_modules/nhsapp-frontend/dist/nhsapp";
+          SCSS
+          cat > .tmp/consumer/root-use.scss <<'SCSS'
+          @use "node_modules/nhsapp-frontend/dist/nhsapp";
+          SCSS
+          cat > .tmp/consumer/button-import.scss <<'SCSS'
+          @import "node_modules/nhsapp-frontend/dist/nhsapp/components/button";
+          SCSS
+
+      - name: Compile with repository Sass version
+        working-directory: .tmp/consumer
+        run: |
+          ../../../node_modules/.bin/sass --version
+          ../../../node_modules/.bin/sass all-import.scss all-local.css --style=compressed --no-source-map
+          ../../../node_modules/.bin/sass root-import.scss root-local.css --style=compressed --no-source-map
+          ../../../node_modules/.bin/sass root-use.scss root-use-local.css --style=compressed --no-source-map
+          ../../../node_modules/.bin/sass button-import.scss button-local.css --style=compressed --no-source-map
+          cmp all-local.css root-local.css
+          cmp all-local.css root-use-local.css
+          grep -Fq '.nhsapp-card' root-local.css
+          grep -Fq '.nhsapp-button' button-local.css
+          ! grep -Eq '@import[[:space:]]+(url\()?['\"'\'']?node_modules' root-local.css
+
+      - name: Compile with minimum declared development Sass version
+        working-directory: .tmp/consumer
+        run: |
+          npm exec --yes --package=sass@1.74.1 -- sass --version
+          npm exec --yes --package=sass@1.74.1 -- sass all-import.scss all-174.css --style=compressed --no-source-map
+          npm exec --yes --package=sass@1.74.1 -- sass root-import.scss root-174.css --style=compressed --no-source-map
+          npm exec --yes --package=sass@1.74.1 -- sass root-use.scss root-use-174.css --style=compressed --no-source-map
+          npm exec --yes --package=sass@1.74.1 -- sass button-import.scss button-174.css --style=compressed --no-source-map
+          cmp all-174.css root-174.css
+          cmp all-174.css root-use-174.css
+          grep -Fq '.nhsapp-card' root-174.css
+          grep -Fq '.nhsapp-button' button-174.css
+
+      - name: Prove current upstream does not provide equivalent source entrypoint
+        run: |
+          git worktree add --detach .tmp/upstream 775518abf9f7a88e2fdd4a4c28048ca8c3f0b639
+          pushd .tmp/upstream
+          npm ci
+          npm run prepack
+          mkdir -p ../upstream-consumer/node_modules/nhsapp-frontend
+          npm pack --ignore-scripts --pack-destination ../upstream-package
+          upstream_tarball=$(find ../upstream-package -maxdepth 1 -name '*.tgz' -print -quit)
+          tar -xzf "$upstream_tarball" -C ../upstream-consumer/node_modules/nhsapp-frontend --strip-components=1
+          popd
+          test ! -e .tmp/upstream-consumer/node_modules/nhsapp-frontend/dist/_nhsapp.scss
+          test ! -e .tmp/upstream-consumer/node_modules/nhsapp-frontend/dist/nhsapp/index.scss
+          cat > .tmp/upstream-consumer/root.scss <<'SCSS'
+          @import "node_modules/nhsapp-frontend/dist/nhsapp";
+          SCSS
+          cat > .tmp/upstream-consumer/all.scss <<'SCSS'
+          @import "node_modules/nhsapp-frontend/dist/nhsapp/all";
+          SCSS
+          pushd .tmp/upstream-consumer
+          set +e
+          ../../../node_modules/.bin/sass root.scss root.css --style=compressed --no-source-map > root.log 2>&1
+          root_status=$?
+          ../../../node_modules/.bin/sass all.scss all.css --style=compressed --no-source-map > all.log 2>&1
+          all_status=$?
+          set -e
+          test "$all_status" -eq 0
+          if test "$root_status" -eq 0; then
+            ! cmp -s root.css all.css
+          fi
+          popd
+
+      - name: Inspect release archive
+        run: |
+          npm run release
+          archive=$(find dist -maxdepth 1 -name 'nhsapp-frontend-*.zip' -print -quit)
+          test -n "$archive"
+          unzip -l "$archive" > .tmp/release-files.txt
+          grep -Fq '_nhsapp.scss' .tmp/release-files.txt
+          grep -Fq 'nhsapp/index.scss' .tmp/release-files.txt
+          rm -rf .tmp/release
+          mkdir -p .tmp/release
+          unzip -q "$archive" -d .tmp/release
+          test -f .tmp/release/_nhsapp.scss
+          test -f .tmp/release/nhsapp/index.scss
+          cmp src/_nhsapp.scss .tmp/release/_nhsapp.scss
+          cmp src/index.scss .tmp/release/nhsapp/index.scss
+
+      - name: Confirm clean tracked state
+        run: |
+          test -z "$(git status --porcelain --untracked-files=no)"
