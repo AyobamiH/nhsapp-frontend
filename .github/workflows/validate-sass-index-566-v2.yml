@@ -62,7 +62,7 @@ jobs:
       - name: Validate documentation and release archive
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           ! grep -Fq '@import "node_modules/nhsapp-frontend/' docs/get-started/installing-with-npm.md
           grep -Fq '@import "nhsapp-frontend/dist/nhsapp";' docs/get-started/installing-with-npm.md
           grep -Fq '@import "nhsapp-frontend/dist/nhsapp/components/button";' docs/get-started/installing-with-npm.md
@@ -71,7 +71,9 @@ jobs:
           release_zip=$(find dist -maxdepth 1 -name 'nhsapp-frontend-*.zip' -print -quit)
           test -n "$release_zip"
           unzip -Z1 "$release_zip" > "$RUNNER_TEMP/release-contents.txt"
+          cat "$RUNNER_TEMP/release-contents.txt"
           grep -Fq '_nhsapp.scss' "$RUNNER_TEMP/release-contents.txt"
           grep -Fq 'nhsapp/index.scss' "$RUNNER_TEMP/release-contents.txt"
           git diff --check origin/main...HEAD
+          git status --porcelain --untracked-files=no
           test -z "$(git status --porcelain --untracked-files=no)"
