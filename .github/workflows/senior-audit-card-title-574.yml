@@ -1,0 +1,194 @@
+name: Senior audit card title rendering for issue 574
+
+on:
+  push:
+    branches:
+      - automation/senior-audit-card-title-574
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rendering-contract:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout current upstream-equivalent base
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: automation/senior-audit-card-title-574
+          fetch-depth: 0
+
+      - name: Verify current base and apply candidate diff
+        run: |
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/automation/senior-audit-card-title-574)"
+          python <<'PY'
+          from pathlib import Path
+          path = Path("src/components/card/card.njk")
+          text = path.read_text(encoding="utf-8")
+          old = "      {%- else -%}\n        {%- if params.headingLevel -%}"
+          new = "      {%- elif params.title or params.titleHtml -%}\n        {%- if params.headingLevel -%}"
+          if text.count(old) != 1:
+              raise SystemExit("Candidate hunk no longer applies exactly once")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+          git diff --check
+          test "$(git diff --name-only)" = "src/components/card/card.njk"
+
+      - name: Setup Node
+        uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Render complete title-state matrix
+        run: |
+          mkdir -p .tmp
+          cat > .tmp/render-card-matrix.mjs <<'JS'
+          import fs from "node:fs/promises"
+          import path from "node:path"
+          import nunjucks from "nunjucks"
+
+          const env = new nunjucks.Environment(
+            new nunjucks.FileSystemLoader([
+              "src",
+              "node_modules/nhsuk-frontend/dist",
+              "node_modules/nhsuk-frontend/src"
+            ]),
+            { autoescape: true }
+          )
+
+          const template = `{% from "components/card/macro.njk" import nhsappCard %}{{ nhsappCard(params) }}`
+          const cases = [
+            {
+              name: "description-only",
+              params: { description: "Description only" },
+              expect: { titleElements: 0, links: 0, headings: 0 }
+            },
+            {
+              name: "description-html-only",
+              params: { descriptionHtml: "<p>Description HTML</p>" },
+              expect: { titleElements: 0, links: 0, headings: 0 }
+            },
+            {
+              name: "footer-only",
+              params: { footer: { html: "<p>Footer</p>" } },
+              expect: { titleElements: 0, links: 0, headings: 0 }
+            },
+            {
+              name: "plain-title",
+              params: { title: "Plain title" },
+              expect: { titleElements: 1, links: 0, headings: 0 }
+            },
+            {
+              name: "html-title",
+              params: { titleHtml: "<strong>HTML title</strong>" },
+              expect: { titleElements: 1, links: 0, headings: 0 }
+            },
+            {
+              name: "heading-title",
+              params: { title: "Heading title", headingLevel: 3 },
+              expect: { titleElements: 1, links: 0, headings: 1 }
+            },
+            {
+              name: "linked-title",
+              params: { title: "Linked title", href: "/target" },
+              expect: { titleElements: 0, links: 1, headings: 0 }
+            },
+            {
+              name: "empty-string-title",
+              params: { title: "", description: "Description" },
+              expect: { titleElements: 0, links: 0, headings: 0 }
+            },
+            {
+              name: "heading-without-title",
+              params: { headingLevel: 3, description: "Description" },
+              diagnosticOnly: true
+            },
+            {
+              name: "href-without-title",
+              params: { href: "/target", description: "Description" },
+              diagnosticOnly: true
+            }
+          ]
+
+          const records = []
+          for (const testCase of cases) {
+            const html = env.renderString(template, { params: testCase.params })
+            const titleElements = (html.match(/class="nhsapp-card__title/g) || []).length
+            const links = (html.match(/class="nhsapp-card__link/g) || []).length
+            const headings = (html.match(/<h[1-6][ >]/g) || []).length
+            const emptyParagraphs = (html.match(/<p[^>]*>\s*<\/p>/g) || []).length
+            const emptyHeadings = (html.match(/<h[1-6][^>]*>\s*<\/h[1-6]>/g) || []).length
+            const emptyLinks = (html.match(/<a[^>]*>\s*<\/a>/g) || []).length
+            const record = {
+              name: testCase.name,
+              titleElements,
+              links,
+              headings,
+              emptyParagraphs,
+              emptyHeadings,
+              emptyLinks,
+              html
+            }
+            records.push(record)
+
+            if (!testCase.diagnosticOnly) {
+              for (const [key, expected] of Object.entries(testCase.expect)) {
+                if (record[key] !== expected) {
+                  throw new Error(
+                    `${testCase.name}: expected ${key}=${expected}, got ${record[key]}`
+                  )
+                }
+              }
+              if (emptyParagraphs || emptyHeadings || emptyLinks) {
+                throw new Error(`${testCase.name}: emitted empty semantic markup`)
+              }
+            }
+          }
+
+          await fs.writeFile(
+            ".tmp/card-title-matrix.json",
+            JSON.stringify(records, null, 2)
+          )
+          console.log(JSON.stringify(records, null, 2))
+          JS
+          node .tmp/render-card-matrix.mjs
+
+      - name: Assert reported regression is fixed on current main
+        run: |
+          node <<'JS'
+          const records = require("./.tmp/card-title-matrix.json")
+          for (const name of ["description-only", "description-html-only", "footer-only"]) {
+            const record = records.find((item) => item.name === name)
+            if (!record || record.titleElements !== 0 || record.emptyParagraphs !== 0) {
+              throw new Error(`${name} still emits title markup`)
+            }
+          }
+
+          const headingWithoutTitle = records.find(
+            (item) => item.name === "heading-without-title"
+          )
+          const hrefWithoutTitle = records.find(
+            (item) => item.name === "href-without-title"
+          )
+          console.log("DIAGNOSTIC_HEADING_WITHOUT_TITLE", headingWithoutTitle)
+          console.log("DIAGNOSTIC_HREF_WITHOUT_TITLE", hrefWithoutTitle)
+          JS
+
+      - name: Run repository checks against current main plus candidate
+        run: |
+          npm run lint
+          npm run docs:build
+          npm run prepack
+          cmp src/components/card/card.njk dist/nhsapp/components/card/card.njk
+
+      - name: Confirm audit changed no candidate branch
+        run: |
+          rm -rf .tmp dist docs/_site
+          git checkout -- src/components/card/card.njk
+          test -z "$(git status --porcelain --untracked-files=no)"
