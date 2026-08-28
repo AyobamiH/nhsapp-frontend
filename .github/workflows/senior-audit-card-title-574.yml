@@ -50,7 +50,6 @@ jobs:
           mkdir -p .tmp
           cat > .tmp/render-card-matrix.mjs <<'JS'
           import fs from "node:fs/promises"
-          import path from "node:path"
           import nunjucks from "nunjucks"
 
           const env = new nunjucks.Environment(
@@ -159,7 +158,7 @@ jobs:
           JS
           node .tmp/render-card-matrix.mjs
 
-      - name: Assert reported regression is fixed on current main
+      - name: Assert reported regression and record unsupported-input diagnostics
         run: |
           node <<'JS'
           const records = require("./.tmp/card-title-matrix.json")
@@ -179,6 +178,7 @@ jobs:
           console.log("DIAGNOSTIC_HEADING_WITHOUT_TITLE", headingWithoutTitle)
           console.log("DIAGNOSTIC_HREF_WITHOUT_TITLE", hrefWithoutTitle)
           JS
+          rm -rf .tmp
 
       - name: Run repository checks against current main plus candidate
         run: |
@@ -188,6 +188,7 @@ jobs:
           cmp src/components/card/card.njk dist/nhsapp/components/card/card.njk
 
       - name: Confirm audit changed no candidate branch
+        if: always()
         run: |
           rm -rf .tmp dist docs/_site
           git checkout -- src/components/card/card.njk
