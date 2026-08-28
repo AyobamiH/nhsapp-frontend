@@ -70,7 +70,8 @@ jobs:
           npm run release
           release_zip=$(find dist -maxdepth 1 -name 'nhsapp-frontend-*.zip' -print -quit)
           test -n "$release_zip"
-          unzip -l "$release_zip" | grep -Fq '_nhsapp.scss'
-          unzip -l "$release_zip" | grep -Fq 'nhsapp/index.scss'
+          unzip -Z1 "$release_zip" > "$RUNNER_TEMP/release-contents.txt"
+          grep -Fq '_nhsapp.scss' "$RUNNER_TEMP/release-contents.txt"
+          grep -Fq 'nhsapp/index.scss' "$RUNNER_TEMP/release-contents.txt"
           git diff --check origin/main...HEAD
           test -z "$(git status --porcelain --untracked-files=no)"
