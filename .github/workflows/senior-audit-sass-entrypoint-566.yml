@@ -56,8 +56,10 @@ jobs:
           tarball=$(find .tmp/package -maxdepth 1 -name '*.tgz' -print -quit)
           test -n "$tarball"
           tar -xzf "$tarball" -C .tmp/consumer/node_modules/nhsapp-frontend --strip-components=1
+          cp -a node_modules/nhsuk-frontend .tmp/consumer/node_modules/
           test -f .tmp/consumer/node_modules/nhsapp-frontend/dist/_nhsapp.scss
           test -f .tmp/consumer/node_modules/nhsapp-frontend/dist/nhsapp/index.scss
+          test -d .tmp/consumer/node_modules/nhsuk-frontend
           test ! -e .tmp/consumer/node_modules/nhsapp-frontend/dist/nhsapp/_nhsapp.scss
 
       - name: Create consumer Sass fixtures
@@ -114,6 +116,7 @@ jobs:
           test -n "$upstream_tarball"
           tar -xzf "$upstream_tarball" -C ../upstream-consumer/node_modules/nhsapp-frontend --strip-components=1
           popd
+          cp -a node_modules/nhsuk-frontend .tmp/upstream-consumer/node_modules/
           test ! -e .tmp/upstream-consumer/node_modules/nhsapp-frontend/dist/_nhsapp.scss
           test ! -e .tmp/upstream-consumer/node_modules/nhsapp-frontend/dist/nhsapp/index.scss
           cat > .tmp/upstream-consumer/root.scss <<'SCSS'
