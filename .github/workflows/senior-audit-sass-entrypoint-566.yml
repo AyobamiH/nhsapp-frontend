@@ -78,11 +78,11 @@ jobs:
       - name: Compile with repository Sass version
         working-directory: .tmp/consumer
         run: |
-          ../../../node_modules/.bin/sass --version
-          ../../../node_modules/.bin/sass all-import.scss all-local.css --style=compressed --no-source-map
-          ../../../node_modules/.bin/sass root-import.scss root-local.css --style=compressed --no-source-map
-          ../../../node_modules/.bin/sass root-use.scss root-use-local.css --style=compressed --no-source-map
-          ../../../node_modules/.bin/sass button-import.scss button-local.css --style=compressed --no-source-map
+          ../../node_modules/.bin/sass --version
+          ../../node_modules/.bin/sass all-import.scss all-local.css --style=compressed --no-source-map
+          ../../node_modules/.bin/sass root-import.scss root-local.css --style=compressed --no-source-map
+          ../../node_modules/.bin/sass root-use.scss root-use-local.css --style=compressed --no-source-map
+          ../../node_modules/.bin/sass button-import.scss button-local.css --style=compressed --no-source-map
           cmp all-local.css root-local.css
           cmp all-local.css root-use-local.css
           grep -Fq '.nhsapp-card' root-local.css
@@ -104,13 +104,14 @@ jobs:
 
       - name: Prove current upstream does not provide equivalent source entrypoint
         run: |
+          mkdir -p .tmp/upstream-package .tmp/upstream-consumer/node_modules/nhsapp-frontend
           git worktree add --detach .tmp/upstream 775518abf9f7a88e2fdd4a4c28048ca8c3f0b639
           pushd .tmp/upstream
           npm ci
           npm run prepack
-          mkdir -p ../upstream-consumer/node_modules/nhsapp-frontend
           npm pack --ignore-scripts --pack-destination ../upstream-package
           upstream_tarball=$(find ../upstream-package -maxdepth 1 -name '*.tgz' -print -quit)
+          test -n "$upstream_tarball"
           tar -xzf "$upstream_tarball" -C ../upstream-consumer/node_modules/nhsapp-frontend --strip-components=1
           popd
           test ! -e .tmp/upstream-consumer/node_modules/nhsapp-frontend/dist/_nhsapp.scss
@@ -123,9 +124,9 @@ jobs:
           SCSS
           pushd .tmp/upstream-consumer
           set +e
-          ../../../node_modules/.bin/sass root.scss root.css --style=compressed --no-source-map > root.log 2>&1
+          ../../node_modules/.bin/sass root.scss root.css --style=compressed --no-source-map > root.log 2>&1
           root_status=$?
-          ../../../node_modules/.bin/sass all.scss all.css --style=compressed --no-source-map > all.log 2>&1
+          ../../node_modules/.bin/sass all.scss all.css --style=compressed --no-source-map > all.log 2>&1
           all_status=$?
           set -e
           test "$all_status" -eq 0
