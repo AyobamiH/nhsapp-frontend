@@ -140,7 +140,7 @@ jobs:
           package-manager-cache: false
 
       - name: Build combined branch
-        working-directory: \${{ runner.temp }}/combined
+        working-directory: ${{ runner.temp }}/combined
         run: |
           npm ci
           npm run lint
@@ -149,7 +149,7 @@ jobs:
 
       - name: Prove modern entrypoints are warning-free
         shell: bash
-        working-directory: \${{ runner.temp }}/combined
+        working-directory: ${{ runner.temp }}/combined
         run: |
           set -euo pipefail
           package_file=$(npm pack --ignore-scripts --silent)
