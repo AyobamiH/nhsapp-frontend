@@ -1,0 +1,178 @@
+name: Validate Sass module entrypoints for issue 566
+
+on:
+  push:
+    branches:
+      - automation/validate-sass-modules-566
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-contract:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: feat/sass-index-entrypoints-566
+          fetch-depth: 0
+
+      - name: Verify candidate
+        run: |
+          test "$(git rev-parse HEAD)" = "94bddeb209b8ae7fd45e608c9dcca3bee4236de6"
+          test -z "$(git status --porcelain)"
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run docs:build
+      - run: npm run prepack
+
+      - name: Inspect packed npm package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(cat dist/_nhsapp.scss)" = '@forward "nhsapp/index";'
+          test "$(cat dist/nhsapp/index.scss)" = '@forward "all";'
+          test ! -e dist/nhsapp/_nhsapp.scss
+
+          package_file=$(npm pack --ignore-scripts --silent)
+          package_path="$GITHUB_WORKSPACE/$package_file"
+          consumer="$RUNNER_TEMP/consumer"
+          mkdir -p "$consumer"
+          cd "$consumer"
+          npm init -y >/dev/null
+          npm install "$package_path"
+          test -d node_modules/nhsuk-frontend
+
+          printf '@use "nhsapp-frontend/dist/nhsapp";\n' > root-use.scss
+          printf '@forward "nhsapp-frontend/dist/nhsapp";\n' > root-forward.scss
+          printf '@import "nhsapp-frontend/dist/nhsapp/all";\n' > legacy.scss
+          printf '@use "nhsapp-frontend/dist/nhsapp/components/button";\n' > button-use.scss
+          printf '@import "nhsapp-frontend/dist/nhsapp/components/button";\n' > button-import.scss
+
+          compiler="$GITHUB_WORKSPACE/node_modules/.bin/sass"
+          "$compiler" --no-source-map --load-path=node_modules --style=compressed root-use.scss root-use.css
+          "$compiler" --no-source-map --load-path=node_modules --style=compressed root-forward.scss root-forward.css
+          "$compiler" --no-source-map --load-path=node_modules --style=compressed legacy.scss legacy.css
+          "$compiler" --no-source-map --load-path=node_modules --style=compressed button-use.scss button-use.css
+          "$compiler" --no-source-map --load-path=node_modules --style=compressed button-import.scss button-import.css
+
+          cmp root-use.css root-forward.css
+          cmp root-use.css legacy.css
+          cmp button-use.css button-import.css
+          grep -Fq '.nhsapp-card' root-use.css
+          grep -Fq '.nhsapp-button' button-use.css
+
+      - name: Verify minimum declared Sass version
+        shell: bash
+        run: |
+          set -euo pipefail
+          consumer="$RUNNER_TEMP/consumer"
+          npm exec --yes --package=sass@1.74.1 -- sass --version
+          npm exec --yes --package=sass@1.74.1 -- sass \
+            --no-source-map --load-path="$consumer/node_modules" --style=compressed \
+            "$consumer/root-use.scss" "$consumer/root-use-174.css"
+          npm exec --yes --package=sass@1.74.1 -- sass \
+            --no-source-map --load-path="$consumer/node_modules" --style=compressed \
+            "$consumer/legacy.scss" "$consumer/legacy-174.css"
+          npm exec --yes --package=sass@1.74.1 -- sass \
+            --no-source-map --load-path="$consumer/node_modules" --style=compressed \
+            "$consumer/button-use.scss" "$consumer/button-use-174.css"
+          cmp "$consumer/root-use-174.css" "$consumer/legacy-174.css"
+          grep -Fq '.nhsapp-button' "$consumer/button-use-174.css"
+
+      - name: Inspect release archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run release
+          archive=$(find dist -maxdepth 1 -name 'nhsapp-frontend-*.zip' -print -quit)
+          test -n "$archive"
+          unzip -Z1 "$archive" > "$RUNNER_TEMP/release-files.txt"
+          grep -Fxq 'index.scss' "$RUNNER_TEMP/release-files.txt"
+          ! grep -Fxq '_nhsapp.scss' "$RUNNER_TEMP/release-files.txt"
+
+          release_dir="$RUNNER_TEMP/release"
+          mkdir -p "$release_dir"
+          unzip -q "$archive" -d "$release_dir"
+          test "$(cat "$release_dir/index.scss")" = '@forward "all";'
+          printf '@use "index";\n' > "$release_dir/consumer.scss"
+          "$GITHUB_WORKSPACE/node_modules/.bin/sass" \
+            --no-source-map \
+            --load-path="$release_dir" \
+            --load-path="$RUNNER_TEMP/consumer/node_modules" \
+            --style=compressed \
+            "$release_dir/consumer.scss" "$release_dir/consumer.css"
+          grep -Fq '.nhsapp-card' "$release_dir/consumer.css"
+
+  sass-modernisation-compatibility:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: feat/sass-index-entrypoints-566
+          fetch-depth: 0
+
+      - name: Combine candidate with upstream PR 573
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch https://github.com/nhsuk/nhsapp-frontend.git refs/pull/573/head
+          combined="$RUNNER_TEMP/combined"
+          git worktree add --detach "$combined" FETCH_HEAD
+          git -C "$combined" config user.name "Sass compatibility validation"
+          git -C "$combined" config user.email "validation@example.invalid"
+          git -C "$combined" cherry-pick \
+            4e02f86654c328f859d1b79a3d29b08859bc8f78 \
+            94bddeb209b8ae7fd45e608c9dcca3bee4236de6
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Build combined branch
+        working-directory: \${{ runner.temp }}/combined
+        run: |
+          npm ci
+          npm run lint
+          npm run docs:build
+          npm run prepack
+
+      - name: Prove modern entrypoints are warning-free
+        shell: bash
+        working-directory: \${{ runner.temp }}/combined
+        run: |
+          set -euo pipefail
+          package_file=$(npm pack --ignore-scripts --silent)
+          package_path="$PWD/$package_file"
+          consumer="$RUNNER_TEMP/modern-consumer"
+          mkdir -p "$consumer"
+          cd "$consumer"
+          npm init -y >/dev/null
+          npm install "$package_path"
+
+          printf '@use "nhsapp-frontend/dist/nhsapp";\n' > root-use.scss
+          printf '@import "nhsapp-frontend/dist/nhsapp/all";\n' > legacy.scss
+          printf '@use "nhsapp-frontend/dist/nhsapp/components/button";\n' > button-use.scss
+
+          compiler="$RUNNER_TEMP/combined/node_modules/.bin/sass"
+          "$compiler" --no-source-map --load-path=node_modules --style=compressed \
+            root-use.scss root-use.css 2> root-use.stderr
+          "$compiler" --no-source-map --load-path=node_modules --style=compressed \
+            legacy.scss legacy.css 2> legacy.stderr
+          "$compiler" --no-source-map --load-path=node_modules --style=compressed \
+            button-use.scss button-use.css 2> button-use.stderr
+
+          cmp root-use.css legacy.css
+          grep -Fq '.nhsapp-button' button-use.css
+          ! grep -Fq 'DEPRECATION WARNING' root-use.stderr
+          ! grep -Fq 'DEPRECATION WARNING' button-use.stderr
